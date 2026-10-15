@@ -1,0 +1,12 @@
+{
+  "name": "Claw EX Control",
+  "author": "Hardwell-L",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": [
+      "utility"
+    ],
+    "description": "CPU frequency and dual-fan control for MSI Claw EX handhelds."
+  }
+}

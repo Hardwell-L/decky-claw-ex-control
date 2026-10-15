@@ -1,0 +1,25 @@
+[Unit]
+Description=Claw CPU frequency limit controller
+After=systemd-logind.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/lib/claw-cpu-control/daemon.py --user deck
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+StateDirectory=claw-cpu-control
+StateDirectoryMode=0700
+RuntimeDirectory=claw-cpu-control
+RuntimeDirectoryMode=0755
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/sys
+ReadWritePaths=/sys/devices/system/cpu/cpufreq /sys/devices/system/cpu/intel_pstate/no_turbo
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target
