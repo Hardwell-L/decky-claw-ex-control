@@ -1,11 +1,11 @@
-# 0.1.0 验证记录
+# English release validation (0.6.3)
 
-2026-10-14，当前 MSI MS-1T91。
+2026-10-22. Tests use simulated hardware; no sysfs writes, service changes, games or stress tests are performed.
 
-- 21 项 unittest 全部通过（模拟硬件，无真实 sysfs 写入）。
-- TypeScript --noEmit 和 Rollup 构建通过。
-- Python compileall 通过。
-- systemd-analyze verify 在主机只读检查通过。
-- 真实硬件只读探测发现 10 个 policy；构建前后探测配置完全一致。
-- 发布 manifest、ZIP 完整性、tar 路径及无符号链接检查通过。
-- 未安装、启用或启动服务，未做 Steam/Decky 渲染和手柄实机验证，未运行游戏或压力测试。
+- 110 Python tests cover CPU frequency and Turbo, EPP coexistence, fan transactions and suspend/resume recovery, power ownership, startup restore and session caching.
+- Five frontend suites cover CPU, fan, power, startup toggles and shared startup polling.
+- TypeScript checks, Rollup build and Python syntax validation are required for packaging.
+- Release ZIP/tar entries and manifest hashes are checked; source and archives exclude local snapshots, backups, installed dependencies and credentials.
+- English text and layout changes still require visual/controller validation inside Steam. Reboot and long-duration thermal behavior are not established by these tests.
+
+Historical baseline: version 0.1.0 passed 21 simulated tests and read-only checks on MS-1T91 on 2026-10-14. That result is not evidence of later-version hardware validation.

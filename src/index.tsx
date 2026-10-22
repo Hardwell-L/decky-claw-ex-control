@@ -1,3 +1,5 @@
+import { BootToggle } from './BootToggle';
+import { PowerPanel } from './PowerPanel';
 import { FanPanel } from './FanPanel';
 import { useEffect, useRef, useState } from 'react';
 import { definePlugin, callable } from '@decky/api';
@@ -10,14 +12,14 @@ type Status = {ok: boolean; error?: string; revision?: string; state?: string; m
   presets?: Record<string, Values|null>; applied?: Values & {name: string}; ui?: {name:string; independent:boolean}};
 const getStatus = callable<[], Status>('get_status');
 const mutate = callable<[Record<string, unknown>], Status>('mutate');
-const names: Record<string, string> = {default:'默认', balanced:'平衡', powersave:'省电'};
-const states: Record<string, string> = {idle:'未接管 CPU', active:'限频生效', conflict:'外部配置变化', recovery_required:'需要恢复', read_only:'只读', restoring:'恢复中'};
+const names: Record<string, string> = {default:'Default', balanced:'Balanced', powersave:'Power saving'};
+const states: Record<string, string> = {idle:'CPU managed by system', active:'Frequency limits active', conflict:'External settings changed', recovery_required:'Recovery required', read_only:'Read-only', restoring:'Restoring'};
 // Shared across panel mounts, so closing/reopening cannot reorder a final edit.
 let writes: Promise<unknown> = Promise.resolve();
 function submit(action: Record<string, unknown>): Promise<Status> {
   const result = writes.then(async () => {
     const latest = await getStatus();
-    if (!latest.ok || !latest.revision) throw new Error(latest.error || '服务不可用');
+    if (!latest.ok || !latest.revision) throw new Error(latest.error || 'Service unavailable');
     return mutate({...action,request_id:crypto.randomUUID(),expected_revision:latest.revision});
   });
   writes = result.catch(()=>undefined);
@@ -48,7 +50,7 @@ function Content() {
     if (alive.current) {setBusy(true);setPending(false);setError('');}
     return submit(action).then(s=>{
       if (s.revision) update(s);
-      if (!s.ok) throw new Error(s.error || '操作未完成');
+      if (!s.ok) throw new Error(s.error || 'Operation incomplete');
     }).catch(err=>{if(alive.current) setError(String(err));})
       .finally(()=>{if(alive.current)setBusy(false);});
   }
@@ -116,51 +118,54 @@ function Content() {
   const editable=ready && Object.keys(status.policies || {}).length===10 && ['idle','active'].includes(status.state || '') && !busy;
   const linked=linkedValues(percent), pairDiffers=linked.p!==p || linked.e!==e;
   return <>
-    <PanelSection title="CPU 最高频率">
+    <PanelSection title="CPU frequency limits">
       <PanelSectionRow><div style={{fontSize:13,lineHeight:1.6}}>
-        {states[status.state || ''] || '连接服务中'}{status.applied ? ` · ${names[status.applied.name]}` : ''}<br/>
-        {busy ? '正在保存 / 更新…' : pending ? '停止调节后自动保存并应用…' : '已开启自动保存'}
-        {!status.gaming && <div>桌面模式只保存配置；游戏模式中主动选择或调整才生效。</div>}
+        {states[status.state || ''] || 'Connecting to service'}{status.applied ? ` · ${names[status.applied.name]}` : ''}<br/>
+        {busy ? 'Saving / updating…' : pending ? 'Release to save and apply…' : 'Autosave enabled'}
+        {!status.gaming && <div>Desktop mode saves only. Select or adjust a preset in game mode to apply.</div>}
         {status.message && <div>{status.message}</div>}
         {(error || status.error) && <div style={{color:'#ffbf80'}}>{error || status.error}</div>}
       </div></PanelSectionRow>
-      <PanelSectionRow><ToggleField label="CPU 睿频" checked={status.turbo_enabled===true}
+      <PanelSectionRow><ToggleField label="CPU Turbo" checked={status.turbo_enabled===true}
         disabled={!editable || pending || !status.gaming || status.turbo_enabled==null}
         onChange={enabled=>void execute({method:'set_turbo',enabled})}/></PanelSectionRow>
-      <PanelSectionRow><div style={{fontSize:12,opacity:.7}}>关闭睿频后，实际频率上限还受基准频率限制。开关不随预设保存或开机自动应用。</div></PanelSectionRow>
+      <PanelSectionRow><div style={{fontSize:12,opacity:.7}}>With Turbo off, base frequency also limits the CPU. Startup restore is optional.</div></PanelSectionRow>
+      <BootToggle feature="turbo" label="Restore Turbo at startup"/>
       {Object.entries(names).map(([key,label])=><PanelSectionRow key={key}>
         <ButtonItem layout="below" disabled={!editable || pending} onClick={()=>select(key)}>{name===key?'✓ ':''}{label}</ButtonItem>
       </PanelSectionRow>)}
       <PanelSectionRow><ButtonItem layout="below" disabled={!ready || busy || pending} onClick={toggleMode}>
-        {independent?'调整方式：P/E 独立':'调整方式：P/E 联动'}
+        {independent?'P/E mode: Separate':'P/E mode: Linked'}
       </ButtonItem></PanelSectionRow>
       {independent ? <>
-        <PanelSectionRow><SliderField label="P 核最高频率" value={p} min={pb.min} max={pb.max} step={100} showValue valueSuffix=" MHz" disabled={!editable} onChange={v=>schedule(v,e)}/></PanelSectionRow>
-        <PanelSectionRow><SliderField label="E 核最高频率" value={e} min={eb.min} max={eb.max} step={100} showValue valueSuffix=" MHz" disabled={!editable} onChange={v=>schedule(p,v)}/></PanelSectionRow>
-      </> : <PanelSectionRow><SliderField label="CPU 频率上限比例" value={percent} min={minimumPercent} max={100} step={1} showValue valueSuffix="%" disabled={!editable} onChange={v=>{setRatio(v);const next=linkedValues(v);schedule(next.p,next.e);}}/></PanelSectionRow>}
+        <PanelSectionRow><SliderField label="P-core limit" value={p} min={pb.min} max={pb.max} step={100} showValue valueSuffix=" MHz" disabled={!editable} onChange={v=>schedule(v,e)}/></PanelSectionRow>
+        <PanelSectionRow><SliderField label="E-core limit" value={e} min={eb.min} max={eb.max} step={100} showValue valueSuffix=" MHz" disabled={!editable} onChange={v=>schedule(p,v)}/></PanelSectionRow>
+      </> : <PanelSectionRow><SliderField label="CPU limit ratio" value={percent} min={minimumPercent} max={100} step={1} showValue valueSuffix="%" disabled={!editable} onChange={v=>{setRatio(v);const next=linkedValues(v);schedule(next.p,next.e);}}/></PanelSectionRow>}
       <PanelSectionRow><div style={{fontSize:13,lineHeight:1.6}}>
-        配置：P 核 {p} MHz · E 核 {e} MHz<br/>
-        {!independent && pairDiffers && <>当前保留独立数值，拖动后按比例联动。<br/></>}
-        {!status.presets?.[name] && <>此预设尚未配置，移动滑块后保存。<br/></>}
-        停止调节约 0.6 秒后生效。“默认”也可自定义。<br/>
-        重新打开页面只记住选择；开机不自动限频。
+        Target: P {p} MHz · E {e} MHz<br/>
+        {!independent && pairDiffers && <>Separate values are retained until you move the linked slider.<br/></>}
+        {!status.presets?.[name] && <>Preset not configured. Move a slider to save it.<br/></>}
+        Applies 0.6 seconds after adjustment. Default is also editable.<br/>
+        Reopening does not apply settings. The toggle below controls startup restore.
       </div></PanelSectionRow>
-      <PanelSectionRow><ButtonItem layout="below" disabled={!ready || busy || (!pending && !status.has_transaction)} onClick={restore}>恢复系统原始配置</ButtonItem></PanelSectionRow>
-      <PanelSectionRow><div style={{fontSize:12,opacity:.7}}>恢复本次接管前各核心上限，以及本插件修改前的睿频状态；不删除预设。</div></PanelSectionRow>
+      <BootToggle feature="cpu" label="Restore CPU at startup"/>
+      <PanelSectionRow><ButtonItem layout="below" disabled={!ready || busy || (!pending && !status.has_transaction)} onClick={restore}>Restore original settings</ButtonItem></PanelSectionRow>
+      <PanelSectionRow><div style={{fontSize:12,opacity:.7}}>Restore original per-core limits and Turbo state. Presets are retained.</div></PanelSectionRow>
     </PanelSection>
-    <PanelSection title="当前回读上限">
-      {(['P','E'] as const).map(group=><PanelSectionRow key={group}><div style={{fontSize:13}}>{group} 核：
+    <PanelSection title="Frequency readback">
+      {(['P','E'] as const).map(group=><PanelSectionRow key={group}><div style={{fontSize:13}}>{group} cores:{' '}
         {[...new Set(Object.values(status.policies || {}).filter(x=>x.group===group).map(x=>x.max/1000))].sort((a,b)=>a-b).join(' / ') || '—'} MHz
       </div></PanelSectionRow>)}
-      <PanelSectionRow><div style={{fontSize:12,opacity:.7}}>只控制 CPU 频率上限；TDP 仍由原有工具管理。实际运行频率可能更低。</div></PanelSectionRow>
+      <PanelSectionRow><div style={{fontSize:12,opacity:.7}}>CPU limits only. Adjust PL1/PL2 on the Power page. Actual frequency may be lower.</div></PanelSectionRow>
     </PanelSection>
   </>;
 }
 function Pages() {
   const [page,setPage]=useState('cpu');
-  return <><PanelSection><PanelSectionRow><Focusable flow-children="horizontal" style={{display:'grid',gridTemplateColumns:'repeat(2, minmax(0, 1fr))',gap:8,width:'100%',minWidth:0}}>
+  return <><PanelSection><PanelSectionRow><Focusable flow-children="horizontal" style={{display:'grid',gridTemplateColumns:'repeat(3, minmax(0, 1fr))',gap:8,width:'100%',minWidth:0}}>
     <DialogButton style={{minWidth:0,width:'100%',margin:0,padding:'10px 4px',boxSizing:'border-box'}} onClick={()=>setPage('cpu')}>{page==='cpu'?'✓ ':''}CPU</DialogButton>
-    <DialogButton style={{minWidth:0,width:'100%',margin:0,padding:'10px 4px',boxSizing:'border-box'}} onClick={()=>setPage('fan')}>{page==='fan'?'✓ ':''}风扇</DialogButton>
-  </Focusable></PanelSectionRow></PanelSection>{page==='cpu'?<Content/>:<FanPanel/>}</>;
+    <DialogButton style={{minWidth:0,width:'100%',margin:0,padding:'10px 4px',boxSizing:'border-box'}} onClick={()=>setPage('fan')}>{page==='fan'?'✓ ':''}Fans</DialogButton>
+    <DialogButton style={{minWidth:0,width:'100%',margin:0,padding:'10px 4px',boxSizing:'border-box'}} onClick={()=>setPage('power')}>{page==='power'?'✓ ':''}Power</DialogButton>
+  </Focusable></PanelSectionRow></PanelSection>{page==='cpu'?<Content/>:page==='fan'?<FanPanel/>:<PowerPanel/>}</>;
 }
 export default definePlugin(()=>({name:'Claw EX Control',titleView:<div>Claw EX Control</div>,content:<Pages/>,icon:<span>CPU</span>}));

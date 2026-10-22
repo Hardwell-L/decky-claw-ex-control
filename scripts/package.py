@@ -17,7 +17,7 @@ plugin=stage/'decky-plugin'; plugin.mkdir()
 for name in ['main.py','plugin.json','package.json','README.md','LICENSE']:
     shutil.copyfile(root/name,plugin/name)
 shutil.copytree(root/'dist',plugin/'dist')
-for folder,files in {'backend':['daemon.py','fan.py'],'scripts':['install.py','uninstall.py','control.py'], 'systemd':['claw-cpu-control.service']}.items():
+for folder,files in {'backend':['daemon.py','fan.py','power.py','autostart.py'],'scripts':['install.py','uninstall.py','control.py'], 'systemd':['claw-cpu-control.service']}.items():
     (stage/folder).mkdir()
     for f in files: shutil.copyfile(root/folder/f,stage/folder/f)
 shutil.copyfile(root/'README.md',stage/'README.md')

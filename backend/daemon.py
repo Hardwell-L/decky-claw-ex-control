@@ -65,16 +65,16 @@ class Hardware:
 
     def discover(self):
         if self.read(Path('/sys/class/dmi/id/board_name')) != 'MS-1T91':
-            raise ValueError('仅支持已核查的 MS-1T91 主板')
+            raise ValueError('Only the verified MS-1T91 board is supported')
         groups = {key: cpu_set(self.read(Path('/sys/bus/event_source/devices') / pmu / 'cpus'))
                   for key, pmu in [('P', 'cpu_core'), ('E', 'cpu_atom')]}
         online = cpu_set(self.read(self.root / 'online'))
         if len(groups['P']) != 2 or len(groups['E']) != 8 or groups['P'] & groups['E'] or online != groups['P'] | groups['E']:
-            raise ValueError('核心拓扑与已核查的 2P+8E 不同；请重新检查 BIOS/在线核心')
+            raise ValueError('Topology differs from the verified 2P+8E layout; check BIOS and online cores')
         pstate = {n: self.read(self.root / 'intel_pstate' / n)
                   for n in ['status', 'no_turbo', 'max_perf_pct', 'min_perf_pct', 'hwp_dynamic_boost']}
         if pstate['status'] != 'active':
-            raise ValueError('需要 intel_pstate active 模式')
+            raise ValueError('intel_pstate active mode is required')
         policies = {}
         seen = set()
         for p in sorted((self.root / 'cpufreq').glob('policy[0-9]*')):
@@ -82,12 +82,12 @@ class Hardware:
             affected = cpu_set(self.read(p / 'affected_cpus'))
             group = next((g for g, members in groups.items() if cpus and cpus <= members), None)
             if not group or cpus & seen or cpus != affected or len(cpus) != 1:
-                raise ValueError('不支持共享、离线或跨核心类型的 policy')
+                raise ValueError('Shared, offline or mixed-core-type policies are unsupported')
             if self.read(p / 'scaling_driver') != 'intel_pstate':
-                raise ValueError('CPU 驱动已变化')
+                raise ValueError('CPU driver changed')
             resolved = p.resolve()
             if not resolved.is_relative_to(self.root):
-                raise ValueError('policy 路径不在 CPU sysfs 中')
+                raise ValueError('Policy path is outside CPU sysfs')
             seen |= cpus
             policies[p.name] = {'group': group, 'cpus': sorted(cpus), 'path': str(resolved),
                 'min': int(self.read(p / 'scaling_min_freq')),
@@ -98,7 +98,7 @@ class Hardware:
                 'governor': self.read(p / 'scaling_governor'),
                 'epp': self.read(p / 'energy_performance_preference')}
         if seen != online or len(policies) != 10:
-            raise ValueError('CPU policy 集合不完整')
+            raise ValueError('CPU policy set is incomplete')
         return {'policies': policies, 'global': pstate}
 
     def write_no_turbo(self, value):
@@ -119,9 +119,13 @@ def fingerprint(snapshot):
             for n, p in snapshot['policies'].items()}
 
 
+def without_epp(snapshot):
+    return {**snapshot, 'policies': {n: {k:v for k,v in p.items() if k != 'epp'}
+                                  for n,p in snapshot['policies'].items()}}
+
 def guards(snapshot):
     return {'global': snapshot['global'],
-            'policies': {n: {k: p[k] for k in ['min', 'governor', 'epp']}
+            'policies': {n: {k: p[k] for k in ['min', 'governor']}
                          for n, p in snapshot['policies'].items()}}
 
 
@@ -136,7 +140,7 @@ class Engine:
         if self.presets_file.exists():
             stored = json.loads(self.presets_file.read_text())
             if stored.get('schema') != 1:
-                raise ValueError('未知的预设文件版本')
+                raise ValueError('Unknown preset file version')
             ui = stored.get('ui', self.ui)
             self.validate_ui(ui)
             self.ui = ui
@@ -155,8 +159,11 @@ class Engine:
         self.cache = {}
         if self.journal.exists():
             self.tx = json.loads(self.journal.read_text())
+            # Legacy journals included EPP, which is owned by the system profile.
+            for policy in self.tx.get('guards', {}).get('policies', {}).values():
+                policy.pop('epp', None)
             if self.tx.get('schema') != 1:
-                raise ValueError('未知的恢复记录版本，拒绝覆盖')
+                raise ValueError('Unknown recovery record version; refusing overwrite')
             if self.tx['boot'] != self.boot:
                 self.archive('previous-boot')
             else:
@@ -174,7 +181,7 @@ class Engine:
                             self.tx['last'][n] = current
                     self.restore()
                 except Exception as e:
-                    self.message = '恢复未完成：' + str(e)
+                    self.message = 'Recovery incomplete: ' + str(e)
                     LOG.exception('Startup recovery failed')
 
     def changed(self):
@@ -200,7 +207,7 @@ class Engine:
     @staticmethod
     def validate_ui(ui):
         if type(ui) is not dict or set(ui) != {'name', 'independent'} or ui['name'] not in PRESETS or type(ui['independent']) is not bool:
-            raise ValueError('无效界面偏好')
+            raise ValueError('Invalid UI preferences')
 
     def save_settings(self, presets, ui):
         self.validate_ui(ui)
@@ -211,10 +218,10 @@ class Engine:
     @staticmethod
     def check_numbers(values):
         if set(values) != {'p_max_khz', 'e_max_khz'}:
-            raise ValueError('需要 P/E 上限，禁止额外字段')
+            raise ValueError('P/E limits required; extra fields are not allowed')
         for v in values.values():
             if type(v) is not int or not 100000 <= v <= 10000000:
-                raise ValueError('频率必须为整数 kHz')
+                raise ValueError('Frequency must be an integer in kHz')
 
     def target_values(self, snapshot, values):
         self.check_numbers(values)
@@ -223,11 +230,11 @@ class Engine:
             requested = values['p_max_khz' if p['group'] == 'P' else 'e_max_khz']
             target = min(requested, p['hw_max'], p.get('base', p['hw_max']) if snapshot['global']['no_turbo'] == '1' else p['hw_max'])
             if target < max(p['min'], p['hw_min']):
-                raise ValueError(n + ' 目标低于当前最小频率；未修改任何字段')
+                raise ValueError(n + ' target is below the current minimum; nothing changed')
             targets[n] = target
         for group, key in [('P', 'p_max_khz'), ('E', 'e_max_khz')]:
             if values[key] > max(self.tx.get('ceilings', {}).get(n, p['hw_max']) if self.tx else p['hw_max'] for n,p in snapshot['policies'].items() if p['group'] == group):
-                raise ValueError(group + ' 组请求超出硬件范围')
+                raise ValueError(group + ' group request is outside hardware limits')
         return targets
 
     def owned(self, snap):
@@ -241,7 +248,7 @@ class Engine:
             snap = self.hw.discover()
             reason = None
             if not self.owned(snap) or guards(snap) != self.tx['guards']:
-                reason = '检测到外部配置或拓扑变化，已暂停应用'
+                reason = 'External settings or topology changed; application paused'
             if reason and self.state != 'conflict':
                 self.state, self.message = 'conflict', reason
                 self.changed()
@@ -283,22 +290,22 @@ class Engine:
         # Core identity and minimum capability must remain unchanged.
         identity = lambda snap: {n:{k:p[k] for k in ('group','cpus','path','hw_min')} for n,p in snap['policies'].items()}
         if identity(after) != identity(before):
-            raise ValueError('睿频切换期间拓扑变化')
+            raise ValueError('Topology changed during Turbo toggle')
         expected_global = {**before['global'], 'no_turbo': target}
         if after['global'] != expected_global:
-            raise ValueError('睿频切换期间其他全局设置变化')
+            raise ValueError('Other global settings changed during Turbo toggle')
         for n, p in after['policies'].items():
             old = before['policies'][n]
-            if (p['governor'], p['epp'], p['min']) != (old['governor'], old['epp'], old['min']):
-                raise ValueError('睿频切换期间 governor/EPP/最小频率变化')
+            if (p['governor'], p['min']) != (old['governor'], old['min']):
+                raise ValueError('Governor or minimum frequency changed during Turbo toggle')
             if target == '1':
                 if p['hw_max'] not in (old['hw_max'], p['base']):
-                    raise ValueError(n + ' 关闭睿频后的硬件上限变化异常')
+                    raise ValueError(n + ' unexpected hardware limit after disabling Turbo')
                 expected = min(old['max'], p['base'])
                 if p['max'] != expected:
-                    raise ValueError(n + ' 关闭睿频后的回读不符合预期')
+                    raise ValueError(n + ' unexpected readback after disabling Turbo')
             elif not (old['max'] <= p['max'] <= p['hw_max'] and old['hw_max'] <= p['hw_max'] <= 10000000):
-                raise ValueError(n + ' 开启睿频后的回读不符合预期')
+                raise ValueError(n + ' unexpected readback after enabling Turbo')
         self.tx['topology'] = fingerprint(after)
         ceilings = self.tx.setdefault('ceilings', {n:p['hw_max'] for n,p in before['policies'].items()})
         for n,p in after['policies'].items():
@@ -312,9 +319,9 @@ class Engine:
     def write_turbo(self, target, snap):
         turbo = self.tx['turbo']
         if snap['global']['no_turbo'] != turbo['last'] or not self.owned(snap) or guards(snap) != self.tx['guards']:
-            raise ValueError('配置已被其他组件修改，拒绝切换睿频')
+            raise ValueError('Settings changed externally; refusing Turbo toggle')
         if target == '1' and any(p['min'] > p['base'] for p in snap['policies'].values()):
-            raise ValueError('当前最小频率高于基准频率，不能安全关闭睿频')
+            raise ValueError('Minimum frequency exceeds base frequency; cannot safely disable Turbo')
         turbo['pending'] = {'target': target, 'before': snap}
         self.persist()
         self.hw.write_no_turbo(target)
@@ -324,7 +331,7 @@ class Engine:
             after = self.hw.discover()
             try:
                 if after['global']['no_turbo'] != target:
-                    raise ValueError('睿频状态尚未更新')
+                    raise ValueError('Turbo state has not updated yet')
                 self.accept_turbo_transition(snap, after, target)
                 return
             except ValueError:
@@ -334,17 +341,17 @@ class Engine:
 
     def set_turbo(self, enabled):
         if type(enabled) is not bool:
-            raise ValueError('睿频开关必须为布尔值')
+            raise ValueError('Turbo toggle must be a boolean')
         if not self.gaming() or time.monotonic() - self.last_heartbeat > 60:
-            raise ValueError('仅在游戏模式和插件心跳正常时切换睿频')
+            raise ValueError('Turbo toggle requires game mode and a live heartbeat')
         if self.state not in ('idle', 'active'):
-            raise ValueError('请先恢复或解决冲突')
+            raise ValueError('Restore settings or resolve the conflict first')
         snap = self.hw.discover()
         target = '0' if enabled else '1'
         if target == snap['global']['no_turbo']:
             return
         if self.tx and (not self.owned(snap) or guards(snap) != self.tx['guards']):
-            raise ValueError('配置已变化，请先恢复')
+            raise ValueError('Settings changed; restore first')
         if not self.tx:
             self.takeover(snap)
         if 'turbo' not in self.tx:
@@ -356,10 +363,10 @@ class Engine:
             if enabled and self.tx.get('applied'):
                 applied = self.tx['applied']
                 self.apply(applied['name'], {k: applied[k] for k in ('p_max_khz', 'e_max_khz')})
-            self.message = 'CPU 睿频已' + ('开启' if enabled else '关闭')
+            self.message = 'CPU Turbo ' + ('enabled' if enabled else 'disabled')
             self.changed()
         except Exception:
-            self.state, self.message = 'recovery_required', '睿频切换未完成，保留恢复记录；请恢复系统原始配置'
+            self.state, self.message = 'recovery_required', 'Turbo toggle incomplete; recovery record retained. Restore original settings'
             self.changed()
             raise
 
@@ -371,20 +378,20 @@ class Engine:
         snap = self.hw.discover()
         if snap['global']['no_turbo'] == pending['target']:
             self.accept_turbo_transition(pending['before'], snap, pending['target'])
-        elif snap == pending['before']:
+        elif without_epp(snap) == without_epp(pending['before']):
             turbo['pending'] = None
             self.persist()
         else:
-            raise ValueError('睿频切换结果不确定，保留恢复记录')
+            raise ValueError('Turbo toggle outcome is uncertain; recovery record retained')
 
     def write_owned(self, name, target, snap):
         if fingerprint(snap) != self.tx['topology']:
-            raise ValueError('拓扑已变化，拒绝写入')
+            raise ValueError('Topology changed; refusing write')
         p = snap['policies'][name]
         if p['max'] != self.tx['last'][name]:
-            raise ValueError(name + ' 已被其他组件接管')
+            raise ValueError(name + ' is controlled by another component')
         if not p['min'] <= target <= p['hw_max']:
-            raise ValueError(name + ' 恢复/设置目标不在当前范围')
+            raise ValueError(name + ' restore/set target is outside the current range')
         self.tx['pending'] = {'policy': name, 'previous': p['max'], 'target': target}
         self.persist()  # durable before sysfs write
         self.hw.write_max(name, target)
@@ -394,14 +401,14 @@ class Engine:
         while True:
             observed = self.hw.discover()
             if fingerprint(observed) != self.tx['topology']:
-                raise ValueError('写入期间拓扑变化')
+                raise ValueError('Topology changed during write')
             actual = observed['policies'][name]['max']
             if actual == target:
                 break
             if actual != p['max']:
-                raise ValueError(f'{name} 回读 {actual} 与目标 {target} 不一致')
+                raise ValueError(f'{name} readback {actual} differs from target {target}')
             if time.monotonic() >= deadline:
-                raise TimeoutError(f'{name} 等待目标 {target} 超时，回读仍为 {actual}')
+                raise TimeoutError(f'{name} timed out waiting for {target}; readback is {actual}')
             time.sleep(WRITE_POLL_INTERVAL)
         self.tx['last'][name] = actual
         self.tx['pending'] = None
@@ -410,15 +417,15 @@ class Engine:
 
     def apply(self, name, values):
         if name not in PRESETS:
-            raise ValueError('无效预设')
+            raise ValueError('Invalid preset')
         if self.state not in ('idle', 'active'):
-            raise ValueError('请先恢复或解决冲突')
+            raise ValueError('Restore settings or resolve the conflict first')
         if not self.gaming():
-            raise ValueError('仅允许在已确认的 gamescope 游戏会话中应用')
+            raise ValueError('Application requires a verified gamescope gaming session')
         snap = self.hw.discover()
         targets = self.target_values(snap, values)
         if self.tx and (not self.owned(snap) or guards(snap) != self.tx['guards']):
-            raise ValueError('配置已变化，请先恢复')
+            raise ValueError('Settings changed; restore first')
         fresh = self.tx is None
         previous = {n: p['max'] for n, p in snap['policies'].items()}
         previous_applied = self.tx.get('applied') if self.tx else None
@@ -430,13 +437,13 @@ class Engine:
             for n, target in targets.items():
                 now = self.hw.discover()
                 if guards(now) != self.tx['guards'] or not self.owned(now):
-                    raise ValueError('应用期间外部配置发生变化')
+                    raise ValueError('External settings changed during application')
                 if target != now['policies'][n]['max']:
                     touched.append(n)
                     self.write_owned(n, target, now)
             self.tx['applied'] = {'name': name, **values}
             self.persist()
-            self.state, self.message = 'active', '已应用；下方显示真实回读上限'
+            self.state, self.message = 'active', 'Applied; actual limits are shown below'
             self.changed()
             LOG.info('Applied %s %s', name, values)
         except Exception:
@@ -461,9 +468,9 @@ class Engine:
                 self.state, self.message = 'recovery_required', '; '.join(failures)
             elif fresh:
                 self.archive('apply-failed-rolled-back')
-                self.message = '应用失败，已回退到原始上限'
+                self.message = 'Application failed; original limits restored'
             else:
-                self.state, self.message = 'active', '应用失败，已回退到上一次成功状态'
+                self.state, self.message = 'active', 'Application failed; previous successful state restored'
             self.changed()
             raise
 
@@ -475,14 +482,14 @@ class Engine:
         turbo = self.tx.get('turbo')
         if turbo and snap['global']['no_turbo'] != turbo['last']:
             self.archive('external-turbo-owner')
-            self.message = '外部程序已修改睿频，已释放控制并保留当前设置'
+            self.message = 'Turbo changed externally; released control and retained current settings'
             return
         if turbo and turbo['last'] != turbo['baseline']:
             self.write_turbo(turbo['baseline'], snap)
             snap = self.hw.discover()
         if fingerprint(snap) != self.tx['topology']:
             self.state = 'recovery_required'
-            raise ValueError('拓扑改变，保留恢复记录；未写入旧值')
+            raise ValueError('Topology changed; recovery record retained, old values not written')
         self.state = 'restoring'
         skipped, failed = [], []
         for n, baseline in self.tx['baseline'].items():
@@ -496,16 +503,16 @@ class Engine:
                     continue
                 self.write_owned(n, baseline, now)
                 if self.tx['last'][n] != baseline:
-                    raise ValueError('驱动没有精确接受原始值')
+                    raise ValueError('Driver did not accept the exact original value')
             except Exception as e:
                 failed.append(n + ': ' + str(e))
         if failed:
-            self.state, self.message = 'recovery_required', '恢复未完成：' + '; '.join(failed)
+            self.state, self.message = 'recovery_required', 'Recovery incomplete: ' + '; '.join(failed)
             self.persist()
             self.changed()
             raise ValueError(self.message)
         self.archive('restored' if not skipped else 'external-owner')
-        self.message = '已恢复原始上限' if not skipped else '已释放控制；保留外部修改：' + ', '.join(skipped)
+        self.message = 'Original limits restored' if not skipped else 'Control released; external changes retained: ' + ', '.join(skipped)
         LOG.info(self.message)
 
     def request(self, req, uid):
@@ -515,33 +522,33 @@ class Engine:
                    'configure': {'name', 'p_max_khz', 'e_max_khz', 'independent'},
                    'save_ui': {'name', 'independent'}, 'set_turbo': {'enabled'}}
         if type(req) is not dict:
-            raise ValueError('请求必须是对象')
+            raise ValueError('Request must be an object')
         method = req.get('method')
         if method not in allowed:
-            raise ValueError('未知方法')
+            raise ValueError('Unknown method')
         common = {'method'} if method in ('get_status', 'heartbeat') else {'method', 'request_id', 'expected_revision'}
         if set(req) != common | allowed[method]:
-            raise ValueError('请求字段不匹配')
+            raise ValueError('Invalid request fields')
         if method == 'heartbeat':
             token = req['session_token']
             if not isinstance(token, str) or not 16 <= len(token) <= 128:
-                raise ValueError('无效会话标识')
+                raise ValueError('Invalid session token')
             self.last_heartbeat = time.monotonic()
             return {'ok': True}
         if method == 'get_status':
             return {'ok': True, **self.status()}
         rid = req['request_id']
         if not isinstance(rid, str) or not 8 <= len(rid) <= 128:
-            raise ValueError('无效请求编号')
+            raise ValueError('Invalid request ID')
         digest = hashlib.sha256(json.dumps(req, sort_keys=True).encode()).hexdigest()
         key = (uid, rid)
         if key in self.cache:
             prior_digest, result = self.cache[key]
             if prior_digest != digest:
-                raise ValueError('同一请求编号不能复用于不同操作')
+                raise ValueError('Request ID cannot be reused for a different operation')
             return result
         if req['expected_revision'] != self.revision:
-            raise ValueError('状态已变化，请刷新后重试')
+            raise ValueError('State changed; refresh and retry')
         try:
             if method == 'set_turbo':
                 self.set_turbo(req['enabled'])
@@ -550,23 +557,23 @@ class Engine:
             elif method in ('save_preset', 'configure'):
                 name = req['name']
                 if name not in PRESETS:
-                    raise ValueError('无效预设')
+                    raise ValueError('Invalid preset')
                 values = {k: req[k] for k in ('p_max_khz', 'e_max_khz')}
                 self.target_values(self.hw.discover(), values)
                 new_presets = {**self.presets, name: values}
                 ui = {k: req[k] for k in ('name', 'independent')} if method == 'configure' else self.ui
                 self.save_settings(new_presets, ui)
-                self.message = '已保存配置；尚未应用'
+                self.message = 'Settings saved; not applied'
                 if method == 'configure':
                     if self.gaming():
                         if time.monotonic() - self.last_heartbeat > 60:
-                            raise ValueError('配置已保存，但插件后端心跳不可用，未应用')
+                            raise ValueError('Settings saved but not applied: plugin heartbeat unavailable')
                         self.apply(name, values)
                     else:
-                        self.message = '已保存；当前不是游戏模式，未应用。进入游戏模式后主动选择预设或调整才生效。'
+                        self.message = 'Saved, not applied outside game mode. Select a preset or adjust settings in game mode to apply.'
             elif method == 'apply':
                 if time.monotonic() - self.last_heartbeat > 60:
-                    raise ValueError('插件后端心跳不可用')
+                    raise ValueError('Plugin heartbeat unavailable')
                 self.apply(req['name'], {k: req[k] for k in ('p_max_khz', 'e_max_khz')})
             else:
                 self.restore()
@@ -609,13 +616,34 @@ def game_session(uid):
     return False
 
 
+class SessionProbe:
+    """Share a short-lived session observation; invalidate before mutations/resume."""
+    def __init__(self, probe, clock=time.monotonic, ttl=1.0):
+        self.probe, self.clock, self.ttl = probe, clock, ttl
+        self.expires = float('-inf')
+        self.value = False
+    def invalidate(self):
+        self.expires = float('-inf')
+    def __call__(self):
+        now = self.clock()
+        if now >= self.expires:
+            self.value = bool(self.probe())
+            self.expires = self.clock() + self.ttl
+        return self.value
+
+
 async def serve(uid):
     STATE.mkdir(parents=True, exist_ok=True)
     lock = open(STATE / 'daemon.lock', 'a')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    engine = Engine(Hardware(), STATE, Path('/proc/sys/kernel/random/boot_id').read_text().strip(), lambda: game_session(uid))
+    session_probe = SessionProbe(lambda: game_session(uid))
+    engine = Engine(Hardware(), STATE, Path('/proc/sys/kernel/random/boot_id').read_text().strip(), session_probe)
     from fan import FanEngine, FanHardware
     fans = FanEngine(FanHardware(), STATE, atomic_json, engine.gaming, lambda: engine.last_heartbeat, engine.boot)
+    from power import PowerEngine, PowerHardware
+    power = PowerEngine(PowerHardware(), STATE, atomic_json, engine.gaming, lambda: engine.last_heartbeat, engine.boot)
+    from autostart import Autostart
+    boot_settings = Autostart(STATE, atomic_json, engine.boot, engine, power)
     serial = asyncio.Lock()
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -627,13 +655,24 @@ async def serve(uid):
             peer = writer.get_extra_info('socket').getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12)
             _, peer_uid, _ = struct.unpack('3i', peer)
             if peer_uid not in (uid, 0):
-                raise PermissionError('该用户无权访问控制服务')
+                raise PermissionError('User is not authorized to access this service')
             data = await asyncio.wait_for(reader.readline(), 3)
             if not data.endswith(b'\n') or len(data) > MAX_MESSAGE:
-                raise ValueError('请求过长或未完整结束')
+                raise ValueError('Request too long or incomplete')
             request = json.loads(data)
             async with serial:
-                result = fans.request(request) if isinstance(request, dict) and str(request.get('method', '')).startswith('fan_') else engine.request(request, peer_uid)
+                if isinstance(request, dict) and request.get('method') not in ('get_status','fan_status','power_status','boot_status','heartbeat'):
+                    session_probe.invalidate()
+                if isinstance(request, dict) and str(request.get('method', '')).startswith('boot_'):
+                    result = boot_settings.request(request)
+                else:
+                    if isinstance(request, dict): boot_settings.before_manual(request)
+                    if isinstance(request, dict) and str(request.get('method', '')).startswith('power_'):
+                        result = power.request(request)
+                    else:
+                        result = fans.request(request) if isinstance(request, dict) and str(request.get('method', '')).startswith('fan_') else engine.request(request, peer_uid)
+                    if isinstance(request, dict): boot_settings.after_manual(request, result)
+
         except Exception as e:
             result = {'ok': False, 'error': str(e)}
         try:
@@ -650,11 +689,17 @@ async def serve(uid):
         while not stop.is_set():
             await asyncio.sleep(2)
             async with serial:
+                session_probe.invalidate()
                 now, boot = time.monotonic(), time.clock_gettime(time.CLOCK_BOOTTIME)
-                if (boot - last_boot) - (now - last_mono) > 3:
-                    engine.last_heartbeat = now  # post-resume reconnect grace, no reapply
+                if (boot - last_boot) - (now - last_mono) > 1:
+                    engine.last_heartbeat = now  # CPU reconnect grace; fan waits for a fresh heartbeat
+                    power.on_resume()
+                    fans.on_resume()
+                    LOG.info('Resume detected; checking previously active fan control')
                 last_mono, last_boot = now, boot
                 try:
+                    boot_settings.watchdog()
+                    power.watchdog()
                     fans.watchdog()
                     engine.watchdog(now)
                 except Exception:
@@ -666,14 +711,17 @@ async def serve(uid):
     os.chown(SOCKET, uid, -1)
     os.chmod(SOCKET, 0o600)
     task = asyncio.create_task(monitor())
-    LOG.info('Started read-only idle; no boot preset application')
+    LOG.info('Started backend 0.6.2 EPP-compatible; independent boot options enabled; fan autostart=%s', bool(fans.settings.get('autostart')))
     await stop.wait()
     server.close()
     await server.wait_closed()
     task.cancel()
     async with serial:
         try:
-            fans.restore()
+            try:
+                power.restore()
+            finally:
+                fans.restore()
         finally:
             if engine.tx:
                 engine.restore()
@@ -689,7 +737,7 @@ def main():
         print(json.dumps(Hardware().discover(), ensure_ascii=False, indent=2))
         return
     if os.geteuid() != 0:
-        parser.error('守护进程需要root；只读探测使用 --inspect')
+        parser.error('Daemon requires root; use --inspect for read-only probing')
     logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
     asyncio.run(serve(pwd.getpwnam(args.user).pw_uid))
 

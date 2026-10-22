@@ -7,6 +7,6 @@
     "tags": [
       "utility"
     ],
-    "description": "CPU frequency and dual-fan control for MSI Claw EX handhelds."
+    "description": "CPU, dual-fan and PL1/PL2 power control for MSI Claw EX handhelds."
   }
 }

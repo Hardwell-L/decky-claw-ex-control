@@ -15,7 +15,7 @@ class Plugin:
             await writer.drain()
             return json.loads(await asyncio.wait_for(reader.readline(), 30))
         except (OSError, asyncio.TimeoutError, ValueError) as e:
-            return {'ok': False, 'error': 'CPU 服务不可用：' + str(e)}
+            return {'ok': False, 'error': 'CPU service unavailable: ' + str(e)}
         finally:
             if writer:
                 writer.close()
@@ -27,9 +27,15 @@ class Plugin:
     async def get_fan_status(self):
         return await self._rpc({'method': 'fan_status'})
 
+    async def get_power_status(self):
+        return await self._rpc({'method': 'power_status'})
+
+    async def get_boot_status(self):
+        return await self._rpc({'method':'boot_status'})
+
     async def mutate(self, request):
-        if not isinstance(request, dict) or request.get('method') not in ('save_preset', 'apply', 'restore', 'configure', 'save_ui', 'set_turbo', 'fan_save', 'fan_apply', 'fan_restore', 'fan_autostart'):
-            return {'ok': False, 'error': '不支持的操作'}
+        if not isinstance(request, dict) or request.get('method') not in ('save_preset', 'apply', 'restore', 'configure', 'save_ui', 'set_turbo', 'fan_save', 'fan_apply', 'fan_restore', 'fan_autostart', 'power_save', 'power_apply', 'power_restore', 'boot_set'):
+            return {'ok': False, 'error': 'Unsupported operation'}
         return await self._rpc(request)
 
     async def _main(self):
@@ -45,6 +51,10 @@ class Plugin:
     async def _unload(self):
         if hasattr(self, '_stop'):
             self._stop.set()
+        power = await self.get_power_status()
+        if power.get('has_transaction'):
+            await self._rpc({'method': 'power_restore', 'request_id': uuid.uuid4().hex,
+                             'expected_revision': power['revision']})
         fan = await self.get_fan_status()
         if fan.get('has_transaction'):
             await self._rpc({'method': 'fan_restore', 'request_id': uuid.uuid4().hex,

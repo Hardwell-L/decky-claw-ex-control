@@ -17,10 +17,11 @@ def call(req):
         return result
 
 if __name__ == '__main__':
-    if sys.argv[1:] not in (['status'], ['restore'], ['fan-status'], ['fan-restore']):
-        sys.exit('Usage: control.py status|restore|fan-status|fan-restore')
-    fan=sys.argv[1].startswith('fan-')
-    result=call({'method':'fan_status' if fan else 'get_status'})
-    if sys.argv[1] in ('restore','fan-restore'):
-        result=call({'method':'fan_restore' if fan else 'restore','request_id':uuid.uuid4().hex,'expected_revision':result['revision']})
+    actions={'status':('get_status','restore'),'fan-status':('fan_status','fan_restore'),'power-status':('power_status','power_restore')}
+    arg=sys.argv[1] if len(sys.argv)==2 else ''
+    lookup={'restore':'status','fan-restore':'fan-status','power-restore':'power-status'}.get(arg,arg)
+    if lookup not in actions: sys.exit('Usage: control.py status|restore|fan-status|fan-restore|power-status|power-restore')
+    read,restore=actions[lookup]
+    result=call({'method':read})
+    if arg!=lookup: result=call({'method':restore,'request_id':uuid.uuid4().hex,'expected_revision':result['revision']})
     print(json.dumps(result,ensure_ascii=False,indent=2))

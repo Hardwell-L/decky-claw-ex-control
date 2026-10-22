@@ -106,7 +106,7 @@ class Tests(unittest.TestCase):
         self.e.apply(1,self.draft);self.e.started-=11
         self.hw.telemetry=lambda:{'rpm':[4000,0],'temperature':57}
         self.e.watchdog();self.assertEqual(self.hw.data,self.hw.original)
-        self.assertIn('转速反馈',self.e.error)
+        self.assertIn('RPM feedback',self.e.error)
     def test_read_failure_restores(self):
         self.e.apply(1,self.draft)
         def unavailable(): raise OSError('sensor missing')
@@ -157,3 +157,90 @@ class Tests(unittest.TestCase):
         self.e.apply(1,self.draft);self.request('fan_autostart',enabled=True);self.e.restore()
         self.e=self.engine('new-boot');self.request('fan_restore');self.e.watchdog()
         self.assertIsNone(self.e.tx)
+
+    def resume_ready(self, reset=True):
+        self.e.on_resume()
+        self.e.resume_at -= 3
+        self.beat = time.monotonic()
+        if reset:
+            self.hw.data = copy.deepcopy(self.hw.original)
+
+    def test_resume_reapplies_applied_not_saved_draft(self):
+        self.e.apply(1, self.draft)
+        baseline = copy.deepcopy(self.e.tx['baseline'])
+        altered = copy.deepcopy(self.draft); altered['mode']='fixed'; altered['fixed']=20
+        self.request('fan_save', slot=2, draft=altered)
+        self.resume_ready()
+        self.e.watchdog()
+        self.assertEqual(self.e.state, 'active')
+        self.assertEqual(self.e.tx['applied']['draft'], self.draft)
+        self.assertEqual(self.e.tx['baseline'], baseline)
+        self.e.restore(); self.assertEqual(self.hw.data, self.hw.original)
+
+    def test_resume_unchanged_still_reactivates_and_grants_rpm_grace(self):
+        self.e.apply(1, self.draft); self.resume_ready(reset=False)
+        count=len(self.hw.writes)
+        self.hw.telemetry=lambda:{'rpm':[0,0], 'temperature':57}
+        self.e.watchdog(); self.e.watchdog()
+        self.assertGreater(len(self.hw.writes), count)
+        self.assertEqual(self.e.state, 'active')
+
+    def test_resume_inactive_never_applies(self):
+        self.e.on_resume(); self.e.watchdog()
+        self.assertFalse(self.hw.writes)
+
+    def test_manual_off_during_resume_cancels_reapply(self):
+        self.e.apply(1, self.draft); self.resume_ready()
+        self.request('fan_restore'); count=len(self.hw.writes)
+        self.e.watchdog()
+        self.assertIsNone(self.e.tx)
+        self.assertEqual(self.hw.data, self.hw.original)
+        self.assertEqual(len(self.hw.writes), count)
+
+    def test_resume_foreign_custom_not_overwritten(self):
+        self.e.apply(1, self.draft); self.resume_ready(reset=False)
+        self.hw.data['pwm1_auto_point1_pwm']=51
+        count=len(self.hw.writes); self.e.watchdog()
+        self.assertEqual(self.e.state, 'conflict')
+        self.assertEqual(len(self.hw.writes), count)
+
+    def test_resume_waits_for_fresh_heartbeat_then_times_out(self):
+        self.e.apply(1, self.draft); self.resume_ready()
+        self.beat=self.e.resume_at-1
+        count=len(self.hw.writes); self.e.watchdog()
+        self.assertEqual(len(self.hw.writes), count)
+        self.e.resume_at-=61; self.beat=self.e.resume_at-1
+        self.e.watchdog()
+        self.assertIsNone(self.e.tx)
+        self.assertEqual(self.hw.data, self.hw.original)
+
+    def test_resume_device_temporarily_missing(self):
+        self.e.apply(1, self.draft); self.resume_ready()
+        original=self.hw.snapshot
+        def missing(): raise OSError('device missing')
+        self.hw.snapshot=missing; self.e.watchdog()
+        self.assertIsNotNone(self.e.resume_at)
+        self.hw.snapshot=original; self.e.watchdog()
+        self.assertEqual(self.e.state, 'active')
+
+    def test_resume_partial_write_failure_restores(self):
+        self.e.apply(1, self.draft); self.resume_ready()
+        self.hw.fail='pwm2_auto_point3_pwm'; self.e.watchdog()
+        self.assertIsNone(self.e.tx)
+        self.assertEqual(self.hw.data, self.hw.original)
+        self.assertIn('Application after resume failed', self.e.error)
+
+    def test_resume_without_game_restores_after_grace(self):
+        self.e.apply(1, self.draft); self.resume_ready(); self.game=False
+        self.e.watchdog(); self.assertIsNotNone(self.e.resume_at)
+        self.e.resume_at-=61; self.e.watchdog()
+        self.assertIsNone(self.e.tx)
+        self.assertEqual(self.hw.data, self.hw.original)
+
+    def test_unchanged_curve_points_skip_writes(self):
+        for point,output in zip(self.draft['points'],[60,64,68,74,80,84]):point['output']=output
+        self.e.apply(1,self.draft)
+        # Mode changes still run; unchanged temperatures are not rewritten.
+        self.assertFalse(any(key.endswith('_temp') for key,value in self.hw.writes))
+        self.assertIn(('pwm1_enable',1),self.hw.writes)
+        self.e.restore();self.assertEqual(self.hw.data,self.hw.original)
