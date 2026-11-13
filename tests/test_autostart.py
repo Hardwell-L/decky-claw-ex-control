@@ -83,10 +83,12 @@ class Tests(unittest.TestCase):
    now[0]+=1;self.e.watchdog();self.assertEqual(len(self.power.calls),1)
    self.e.watchdog();self.assertEqual(len(self.power.calls),1)
 
- def test_reenter_game_rearms_only_power(self):
+ def test_reenter_game_restores_enabled_features_once(self):
   self.ready();self.e=self.engine('new');self.settled()
   self.cpu.game=False;self.e.watchdog();self.cpu.game=True;self.settled()
-  self.assertEqual(len(self.power.calls),2);self.assertEqual(len(self.cpu.calls),2)
+  self.assertEqual(len(self.cpu.calls),2)
+  self.cpu.last_heartbeat=time.monotonic();self.settled();self.settled()
+  self.assertEqual(len(self.power.calls),2);self.assertEqual(len(self.cpu.calls),4)
  def test_resume_rearms_enabled_power_once(self):
   self.ready();self.e=self.engine('new');self.settled()
   self.e.on_resume();self.settled();self.settled()

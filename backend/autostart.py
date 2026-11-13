@@ -17,6 +17,7 @@ class Autostart:
         self.revision=uuid.uuid4().hex
         self.cache={}
         self.last_game = None
+        self.desktop_heartbeat = 0.0
         self.power_stable = None
         self.power_since = 0.0
     def persist(self):
@@ -77,9 +78,16 @@ class Autostart:
     def watchdog(self):
         gaming = bool(self.cpu.gaming())
         if self.last_game is False and gaming:
-            self.rearm_power()
+            for key in self.features:
+                entry = self.entry(key)
+                if entry['enabled']:
+                    entry['attempted'] = None
+                    entry['error'] = ''
+            self.persist()
+        if not gaming:
+            self.desktop_heartbeat = self.cpu.last_heartbeat
         self.last_game = gaming
-        if not gaming or self.cpu.last_heartbeat<=0 or time.monotonic()-self.cpu.last_heartbeat>60:
+        if not gaming or self.cpu.last_heartbeat<=self.desktop_heartbeat or time.monotonic()-self.cpu.last_heartbeat>60:
             self.power_stable = None
             return
         for key in self.features:

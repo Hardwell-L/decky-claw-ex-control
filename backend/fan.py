@@ -70,6 +70,8 @@ class FanEngine:
         self.state = 'idle'
         self.cache = {}
         self.started = time.monotonic()
+        self.last_game = None
+        self.desktop_heartbeat = 0.0
         self.resume_at = None
         self.settings = {'selected': 1, 'presets': {str(i): None for i in range(1, 3)}}
         if self.file.exists():
@@ -337,13 +339,19 @@ class FanEngine:
         self.change()
 
     def watchdog(self):
+        gaming = bool(self.gaming())
+        if self.last_game is False and gaming and self.settings.get('autostart'):
+            self.attempted_boot = None
+        if not gaming:
+            self.desktop_heartbeat = self.heartbeat()
+        self.last_game = gaming
         if self.resume_at is not None:
             self.resume_watchdog()
             return
         if not self.tx:
             if (self.state == 'idle' and self.settings.get('autostart')
-                    and self.attempted_boot != self.boot and self.gaming()
-                    and self.heartbeat() > 0 and time.monotonic() - self.heartbeat() <= 60):
+                    and self.attempted_boot != self.boot and gaming
+                    and self.heartbeat() > self.desktop_heartbeat and time.monotonic() - self.heartbeat() <= 60):
                 try:
                     # Persist before touching hardware: never loop after failure/crash.
                     self.consume_boot()

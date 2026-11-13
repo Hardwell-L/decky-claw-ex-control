@@ -1,21 +1,8 @@
-import {cloneElement,isValidElement,ReactNode,useEffect,useState} from 'react';
-import {callable} from '@decky/api';
-import {PanelSectionRow,ButtonItem} from '@decky/ui';
-type Mode='auto'|'zh'|'en';
-let mode:Mode='auto',automatic='en';
-try{const value=localStorage.getItem('claw-ex-language');if(value==='zh'||value==='en')mode=value;}catch{}
-const listeners=new Set<()=>void>();
-let timer:ReturnType<typeof setInterval>|null=null;
-const read=callable<[],{language:string}>('get_ui_language');
-const notify=()=>listeners.forEach(fn=>fn());
-export function useLanguage(){
- const [,setRevision]=useState(0);
- useEffect(()=>{const update=()=>setRevision(v=>v+1);listeners.add(update);
-  if(!timer){const refresh=async()=>{try{const result=await read();const next=result.language==='zh'?'zh':'en';if(next!==automatic){automatic=next;notify();}}catch{}};void refresh();timer=setInterval(refresh,10000);}
-  return()=>{listeners.delete(update);if(!listeners.size&&timer){clearInterval(timer);timer=null;}};
- },[]);
-}
+import {cloneElement,isValidElement,ReactNode} from 'react';
+import {currentLanguage} from './languageSettings';
+export {useLanguage} from './languageSettings';
 const dictionary:Record<string,string>={
+'General settings':'通用设置','Language':'语言','Automatic':'自动',
 'Target: PL1':'目标：PL1',
 'Waiting for delayed readback':'等待延迟复查',
 'Delayed readback verified':'延迟复查通过',
@@ -49,7 +36,7 @@ const dictionary:Record<string,string>={
 'Applied; control will be released if the system changes power limits':'已应用；系统改动功耗时让出控制','System power or performance profile changed; plugin control stopped':'系统功耗或性能模式变化，已让出控制','Original power limits restored; control returned to system':'已恢复原功耗，交还系统管理','System automatic control detected; previous transaction archived. You can apply a preset again.':'系统已恢复自动控制，旧记录已归档，可重新应用方案。',
 };
 export function translate(text:string):string{
- if((mode==='auto'?automatic:mode)!=='zh')return text;
+ if(currentLanguage()!=='zh')return text;
  const clean=text.trim();if(dictionary[clean])return text.replace(clean,dictionary[clean]);
  const marked=clean.match(/^([✓●○]\s*)(.*)$/);if(marked)return marked[1]+translate(marked[2]);
  if(/^Preset \d+$/.test(clean))return text.replace('Preset','方案');
@@ -65,4 +52,3 @@ export function localize(node:ReactNode):ReactNode{
  for(const key of ['label','title','description','children'])if(key in node.props)props[key]=localize(node.props[key] as ReactNode);
  return cloneElement(node,props);
 }
-export function LanguageSelector(){useLanguage();return <PanelSectionRow><ButtonItem layout="below" onClick={()=>{mode=mode==='auto'?'zh':mode==='zh'?'en':'auto';try{localStorage.setItem('claw-ex-language',mode);}catch{}notify();}}>{mode==='auto'?'Language / 语言: Auto':mode==='zh'?'语言：简体中文':'Language: English'}</ButtonItem></PanelSectionRow>;}

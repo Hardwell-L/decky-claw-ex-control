@@ -1,6 +1,6 @@
 {
   "name": "decky-claw-ex-control",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "description": "CPU, dual-fan and PL1/PL2 power control for MSI Claw EX via Decky Loader",
   "type": "module",
   "license": "MIT",

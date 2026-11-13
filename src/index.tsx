@@ -1,4 +1,5 @@
-import {localize,useLanguage,LanguageSelector} from './i18n';
+import {localize,useLanguage} from './i18n';
+import {GeneralSettings} from './GeneralSettings';
 import { BootToggle } from './BootToggle';
 import { PowerPanel } from './PowerPanel';
 import { FanPanel } from './FanPanel';
@@ -165,10 +166,10 @@ function Content() {
 function Pages() {
   useLanguage();
   const [page,setPage]=useState('cpu');
-  return localize(<><PanelSection><LanguageSelector/><PanelSectionRow><Focusable flow-children="horizontal" style={{display:'grid',gridTemplateColumns:'repeat(3, minmax(0, 1fr))',gap:8,width:'100%',minWidth:0}}>
+  return localize(<><PanelSection><PanelSectionRow><Focusable flow-children="horizontal" style={{display:'grid',gridTemplateColumns:'repeat(3, minmax(0, 1fr))',gap:8,width:'100%',minWidth:0}}>
     <DialogButton style={{minWidth:0,width:'100%',margin:0,padding:'10px 4px',boxSizing:'border-box'}} onClick={()=>setPage('cpu')}>{page==='cpu'?'✓ ':''}CPU</DialogButton>
     <DialogButton style={{minWidth:0,width:'100%',margin:0,padding:'10px 4px',boxSizing:'border-box'}} onClick={()=>setPage('fan')}>{page==='fan'?'✓ ':''}Fans</DialogButton>
     <DialogButton style={{minWidth:0,width:'100%',margin:0,padding:'10px 4px',boxSizing:'border-box'}} onClick={()=>setPage('power')}>{page==='power'?'✓ ':''}Power</DialogButton>
-  </Focusable></PanelSectionRow></PanelSection>{page==='cpu'?<Content/>:page==='fan'?<FanPanel/>:<PowerPanel/>}</>);
+  </Focusable></PanelSectionRow><GeneralSettings/></PanelSection>{page==='cpu'?<Content/>:page==='fan'?<FanPanel/>:<PowerPanel/>}</>);
 }
 export default definePlugin(()=>({name:'Claw EX Control',titleView:<div>Claw EX Control</div>,content:<Pages/>,icon:<span>CPU</span>}));

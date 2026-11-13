@@ -21,6 +21,8 @@ for folder,files in {'backend':['daemon.py','fan.py','power.py','autostart.py'],
     (stage/folder).mkdir()
     for f in files: shutil.copyfile(root/folder/f,stage/folder/f)
 shutil.copyfile(root/'README.md',stage/'README.md')
+for destination in (stage, plugin):
+    shutil.copytree(root/'docs'/'screenshots', destination/'docs'/'screenshots')
 manifest={str(p.relative_to(stage)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(stage.rglob('*')) if p.is_file()}
 (stage/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 zip_path=release/f'decky-claw-ex-control-{version}-decky.zip'

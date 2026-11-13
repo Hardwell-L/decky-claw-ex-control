@@ -712,7 +712,7 @@ async def serve(uid):
     os.chown(SOCKET, uid, -1)
     os.chmod(SOCKET, 0o600)
     task = asyncio.create_task(monitor())
-    LOG.info('Started backend 0.6.6 RAPL; independent boot options enabled; fan autostart=%s', bool(fans.settings.get('autostart')))
+    LOG.info('Started backend 0.6.7 RAPL; independent boot options enabled; fan autostart=%s', bool(fans.settings.get('autostart')))
     await stop.wait()
     server.close()
     await server.wait_closed()

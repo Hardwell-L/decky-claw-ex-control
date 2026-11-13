@@ -35,7 +35,7 @@ Open **Claw EX Control → CPU** in Steam game mode. Pick **Default**, **Balance
 - **CPU Turbo** controls boost independently. Disabling Turbo can reduce the attainable frequency below a configured cap. The frequency readback shows the policy ceiling. Actual clock speed varies with workload.
 - **Restore original settings** returns the CPU limits and plugin-managed Turbo state to their pre-control values while keeping saved profiles. Use this button to hand control back after editing **Default**.
 
-Slider edits apply about 0.6 seconds after the last change in game mode. In desktop mode, edits save the profile for later use. CPU caps and package power limits have separate controls. For startup, first apply the settings you want, then enable the corresponding restore switch. CPU frequency, Turbo, package power and fans each have their own opt-in switch.
+Slider edits apply about 0.6 seconds after the last change in game mode. In desktop mode, edits save the profile for later use. CPU caps and package power limits have separate controls. For startup, first apply the settings you want, then enable the corresponding restore switch. CPU frequency, Turbo, package power and fans each have their own opt-in switch. When returning from desktop to game mode, enabled features restore their last applied settings once Decky reconnects.
 
 ## Installation
 
@@ -69,7 +69,7 @@ Open **Fans**, choose one of the two presets and enable fan control. Choose **Fi
 
 Editing saves a draft. Select **Apply settings** to activate it. Disabling fan control returns both fans to firmware automatic mode. If RPM feedback is missing after the ten-second grace period, the controller attempts to restore automatic control.
 
-Apply a fan plan successfully, then enable **Restore fans at startup**. On the next boot, the controller waits for game mode and a live Decky heartbeat before applying that successful plan. Unapplied drafts do not change the boot plan. Each boot allows one automatic attempt; failure or manual restoration does not cause repeated application. Turning the option off cancels future automatic application without changing the current curve.
+Apply a fan plan successfully, then enable **Restore fans at startup**. On the next boot, the controller waits for game mode and a live Decky heartbeat before applying that successful plan. Unapplied drafts do not change the boot plan. Startup and each observed return from desktop to game mode allow one automatic attempt. Failure or manual restoration does not cause repeated application within that game-mode session. Turning the option off cancels future automatic application without changing the current curve.
 
 Closing the panel retains active control. A missing panel heartbeat alone does not cancel an active fan curve; backend RPM monitoring continues. Exiting game mode, plugin unload or normal service shutdown attempts restoration. A crash or power loss cannot guarantee immediate restoration. Recovery records are retained on ambiguous state or external changes; the plugin does not continuously fight another controller.
 
@@ -100,11 +100,11 @@ python3 scripts/package.py
 
 Python uses the standard library. Node dependencies are locked. Release archives and checksums are created under `release/`. The backend only exposes fixed operations through a restricted Unix socket, not arbitrary shell commands or filesystem writes. The installer grants the service write access to the CPU controls, the discovered fan hwmon subtree and the selected RAPL package's two power-limit files.
 
-Version 0.6.6 passed 134 backend tests, six frontend test suites, TypeScript checks and the Rollup build.
+Version 0.6.7 passed 135 backend tests, six frontend test suites, TypeScript checks and the Rollup build.
 
 ## Language
 
-The interface defaults to automatic language selection: Steam language first, then system locale. Chinese Steam/system locales use Simplified Chinese; all others use English. The top Language button cycles Auto / Simplified Chinese / English and saves the preference in Steam browser local storage. Known labels/status text are translated; unknown diagnostic messages retain their original text. Language changes do not apply hardware settings.
+The interface defaults to automatic language selection: Steam language first, then system locale. Chinese Steam/system locales use Simplified Chinese; all others use English. Open **General settings → Language** below the CPU/Fans/Power navigation and select **Automatic**, **简体中文**, or **English**. All three pages share the preference, which is saved in Steam browser local storage. Known labels/status text are translated; unknown diagnostic messages retain their original text. Language changes do not apply hardware settings.
 
 ## License
 

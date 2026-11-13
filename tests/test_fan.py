@@ -295,3 +295,20 @@ class Tests(unittest.TestCase):
         self.e.apply(1,self.draft);self.e.tx['pending']={'before':self.hw.snapshot()}
         self.hw.data=copy.deepcopy(self.hw.original)
         self.e.watchdog();self.assertIsNotNone(self.e.tx)
+
+    def test_desktop_roundtrip_restores_applied_plan_after_new_heartbeat(self):
+        self.e.apply(1,self.draft)
+        self.request('fan_autostart',enabled=True)
+        self.e.watchdog()
+        self.game=False
+        self.e.watchdog()
+        self.assertIsNone(self.e.tx)
+        self.game=True
+        self.e.watchdog()
+        self.assertIsNone(self.e.tx)
+        self.beat=time.monotonic()
+        self.e.watchdog()
+        self.assertEqual(self.e.tx['applied']['slot'],1)
+        self.request('fan_restore')
+        self.e.watchdog()
+        self.assertIsNone(self.e.tx)
