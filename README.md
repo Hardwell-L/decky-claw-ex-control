@@ -2,6 +2,14 @@
 
 A Decky Loader plugin for CPU frequency, linked dual-fan and PL1/PL2 power control on MSI Claw EX handhelds.
 
+## Control panels
+
+| CPU frequency and Turbo | Dual-fan curve | Package power limits |
+| --- | --- | --- |
+| [![CPU presets and linked frequency slider](docs/screenshots/cpu.png)](docs/screenshots/cpu.png) | [![Fan output at six firmware temperature points](docs/screenshots/fans.png)](docs/screenshots/fans.png) | [![PL1 and PL2 targets and RAPL readbacks](docs/screenshots/power.png)](docs/screenshots/power.png) |
+
+Captured from Claw EX Control in Steam Big Picture on the MSI Claw 8 EX. Select an image to view it at full size.
+
 ## Reference hardware
 
 The following values were read on the CachyOS handheld used to develop version 0.6.6. Check the model and board before installing.
