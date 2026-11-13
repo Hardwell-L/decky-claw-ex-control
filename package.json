@@ -1,13 +1,13 @@
 {
   "name": "decky-claw-ex-control",
-  "version": "0.6.3",
+  "version": "0.6.6",
   "description": "CPU, dual-fan and PL1/PL2 power control for MSI Claw EX via Decky Loader",
   "type": "module",
   "license": "MIT",
   "scripts": {
     "build": "rollup -c",
     "typecheck": "tsc --noEmit",
-    "test:ui": "node tests/frontend-smoke.cjs && node tests/fan-frontend-smoke.cjs && node tests/power-frontend-smoke.cjs && node tests/boot-frontend-smoke.cjs && node tests/boot-polling-smoke.cjs"
+    "test:ui": "node tests/frontend-smoke.cjs && node tests/fan-frontend-smoke.cjs && node tests/power-frontend-smoke.cjs && node tests/boot-frontend-smoke.cjs && node tests/boot-polling-smoke.cjs && node tests/i18n-smoke.cjs"
   },
   "devDependencies": {
     "@decky/rollup": "1.0.2",

@@ -1,3 +1,4 @@
+import {localize,useLanguage,LanguageSelector} from './i18n';
 import { BootToggle } from './BootToggle';
 import { PowerPanel } from './PowerPanel';
 import { FanPanel } from './FanPanel';
@@ -38,6 +39,7 @@ function presetValues(s: Status, name: string) {
   return {p:value('P'),e:value('E')};
 }
 function Content() {
+ useLanguage();
   const [status,setStatus] = useState<Status>({ok:false});
   const [name,setName] = useState('default'), [independent,setIndependent] = useState(false);
   const [ratio,setRatio] = useState(100), [p,setP] = useState(4700), [e,setE] = useState(3400);
@@ -117,7 +119,7 @@ function Content() {
   }
   const editable=ready && Object.keys(status.policies || {}).length===10 && ['idle','active'].includes(status.state || '') && !busy;
   const linked=linkedValues(percent), pairDiffers=linked.p!==p || linked.e!==e;
-  return <>
+  return localize(<>
     <PanelSection title="CPU frequency limits">
       <PanelSectionRow><div style={{fontSize:13,lineHeight:1.6}}>
         {states[status.state || ''] || 'Connecting to service'}{status.applied ? ` · ${names[status.applied.name]}` : ''}<br/>
@@ -158,14 +160,15 @@ function Content() {
       </div></PanelSectionRow>)}
       <PanelSectionRow><div style={{fontSize:12,opacity:.7}}>CPU limits only. Adjust PL1/PL2 on the Power page. Actual frequency may be lower.</div></PanelSectionRow>
     </PanelSection>
-  </>;
+  </>);
 }
 function Pages() {
+  useLanguage();
   const [page,setPage]=useState('cpu');
-  return <><PanelSection><PanelSectionRow><Focusable flow-children="horizontal" style={{display:'grid',gridTemplateColumns:'repeat(3, minmax(0, 1fr))',gap:8,width:'100%',minWidth:0}}>
+  return localize(<><PanelSection><LanguageSelector/><PanelSectionRow><Focusable flow-children="horizontal" style={{display:'grid',gridTemplateColumns:'repeat(3, minmax(0, 1fr))',gap:8,width:'100%',minWidth:0}}>
     <DialogButton style={{minWidth:0,width:'100%',margin:0,padding:'10px 4px',boxSizing:'border-box'}} onClick={()=>setPage('cpu')}>{page==='cpu'?'✓ ':''}CPU</DialogButton>
     <DialogButton style={{minWidth:0,width:'100%',margin:0,padding:'10px 4px',boxSizing:'border-box'}} onClick={()=>setPage('fan')}>{page==='fan'?'✓ ':''}Fans</DialogButton>
     <DialogButton style={{minWidth:0,width:'100%',margin:0,padding:'10px 4px',boxSizing:'border-box'}} onClick={()=>setPage('power')}>{page==='power'?'✓ ':''}Power</DialogButton>
-  </Focusable></PanelSectionRow></PanelSection>{page==='cpu'?<Content/>:page==='fan'?<FanPanel/>:<PowerPanel/>}</>;
+  </Focusable></PanelSectionRow></PanelSection>{page==='cpu'?<Content/>:page==='fan'?<FanPanel/>:<PowerPanel/>}</>);
 }
 export default definePlugin(()=>({name:'Claw EX Control',titleView:<div>Claw EX Control</div>,content:<Pages/>,icon:<span>CPU</span>}));

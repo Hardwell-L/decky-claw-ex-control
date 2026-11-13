@@ -27,7 +27,7 @@ const api={callable:route=>async(req)=>{
  return clone();
 }};
 const jsx=(type,props)=>({type,props});
-const context={exports:{},require:name=>name==='react'?react:name==='react/jsx-runtime'?{jsx,jsxs:jsx,Fragment:'fragment'}:name==='@decky/api'?api:{PanelSection:'section',PanelSectionRow:'row',DialogButton:'button',Focusable:'focusable',ButtonItem:'button',SliderField:'slider',ToggleField:'toggle'},
+const context={exports:{},require:name=>name==='./i18n'?{localize:x=>x,useLanguage:()=>{}}:name==='react'?react:name==='react/jsx-runtime'?{jsx,jsxs:jsx,Fragment:'fragment'}:name==='@decky/api'?api:{PanelSection:'section',PanelSectionRow:'row',DialogButton:'button',Focusable:'focusable',ButtonItem:'button',SliderField:'slider',ToggleField:'toggle'},
  setTimeout:(fn,ms)=>{const id=++nextTimer;timers.set(id,{fn,ms});return id;},clearTimeout:id=>timers.delete(id),
  setInterval:()=>0,clearInterval:()=>{},crypto:require('node:crypto')};
 const code=ts.transpileModule(fs.readFileSync('src/FanPanel.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2020}}).outputText;
@@ -43,6 +43,9 @@ function fire(){for(const [id,t] of [...timers]){timers.delete(id);t.fn();}}
 (async()=>{
  render();await settle();assert.equal(requests.length,0,'mount does not apply');
  assert.equal(button('Preset 3'),undefined);assert.equal(button('Preset 4'),undefined);
+ button('Edit').props.onClick();render();
+ assert.equal(slider('Temperature'),undefined,'firmware temperatures are read-only');
+ assert.ok(slider('Output'));
  assert.ok(button('Fixed output'));assert.ok(button('Fan curve'));
  button('Preset 2').props.onClick();render();
  assert.equal(button('Preset 1').props.disabled,false,'saving selection must not disable focused controls');

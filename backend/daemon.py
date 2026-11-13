@@ -687,13 +687,14 @@ async def serve(uid):
     async def monitor():
         last_mono, last_boot = time.monotonic(), time.clock_gettime(time.CLOCK_BOOTTIME)
         while not stop.is_set():
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)  # Supports the power controller's 1 s / 5 s readback checks.
             async with serial:
                 session_probe.invalidate()
                 now, boot = time.monotonic(), time.clock_gettime(time.CLOCK_BOOTTIME)
                 if (boot - last_boot) - (now - last_mono) > 1:
                     engine.last_heartbeat = now  # CPU reconnect grace; fan waits for a fresh heartbeat
                     power.on_resume()
+                    boot_settings.on_resume()
                     fans.on_resume()
                     LOG.info('Resume detected; checking previously active fan control')
                 last_mono, last_boot = now, boot
@@ -711,7 +712,7 @@ async def serve(uid):
     os.chown(SOCKET, uid, -1)
     os.chmod(SOCKET, 0o600)
     task = asyncio.create_task(monitor())
-    LOG.info('Started backend 0.6.2 EPP-compatible; independent boot options enabled; fan autostart=%s', bool(fans.settings.get('autostart')))
+    LOG.info('Started backend 0.6.6 RAPL; independent boot options enabled; fan autostart=%s', bool(fans.settings.get('autostart')))
     await stop.wait()
     server.close()
     await server.wait_closed()

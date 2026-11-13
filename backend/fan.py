@@ -71,19 +71,44 @@ class FanEngine:
         self.cache = {}
         self.started = time.monotonic()
         self.resume_at = None
-        self.settings = {'selected': 1, 'presets': {str(i): None for i in range(1, 5)}}
+        self.settings = {'selected': 1, 'presets': {str(i): None for i in range(1, 3)}}
         if self.file.exists():
             self.settings = json.loads(self.file.read_text())
+        # Retain legacy slots on disk, but expose only two editable presets.
+        presets = self.settings.setdefault('presets', {})
+        selected = self.settings.get('selected', 1)
+        if selected in (3, 4):
+            self.settings.setdefault('legacy_presets', copy.deepcopy(presets))
+            presets['1'] = copy.deepcopy(presets.get(str(selected)))
+            self.settings['selected'] = 1
+        for slot in ('1', '2'):
+            presets.setdefault(slot, None)
         self.tx = json.loads(self.journal.read_text()) if self.journal.exists() else None
         if self.tx:
             try:
                 # EC settings can survive reboot. Recover before optional boot apply.
-                self.restore()
+                if not self.release_automatic(self.hw.snapshot()):
+                    self.restore()
             except Exception as e:
                 self.state, self.error = 'recovery_required', str(e)
 
     def change(self):
         self.revision = uuid.uuid4().hex
+
+    def release_automatic(self, snapshot):
+        # Firmware/Steam can return to automatic mode without a suspend event.
+        # Only release a completed custom transaction; keep partial-write evidence.
+        if (self.tx and not self.tx.get('pending') and self.tx.get('applied')
+                and self.tx['last'].get('pwm1_enable') == 1
+                and snapshot.get('pwm1_enable') == 2 and snapshot.get('pwm2_enable') == 2):
+            if self.journal.exists():
+                self.journal.replace(self.journal.with_name('fan-released-' + str(time.time_ns()) + '.json'))
+            self.tx = None
+            self.state = 'idle'
+            self.error = 'System automatic control detected; previous transaction archived. You can apply a preset again.'
+            self.change()
+            return True
+        return False
 
     @staticmethod
     def validate(draft):
@@ -108,6 +133,8 @@ class FanEngine:
     def status(self):
         try:
             snap = self.hw.snapshot()
+            if self.resume_at is None:
+                self.release_automatic(snap)
             telemetry = self.hw.telemetry()
             initial = {'mode': 'curve', 'fixed': 100, 'points': [
                 {'temp': snap[f'pwm1_auto_point{i}_temp'], 'output': decode(snap[f'pwm1_auto_point{i}_pwm'])}
@@ -118,6 +145,8 @@ class FanEngine:
                     'boot_plan': self.settings.get('boot_plan'),
                     'gaming': bool(self.gaming()), 'has_transaction': bool(self.tx),
                     'applied': self.tx.get('applied') if self.tx else None,
+                    'temperature_axes': [[snap[f'pwm{fan}_auto_point{i}_temp'] for i in range(1, 7)]
+                                         for fan in (1, 2)],
                     'mode': snap['pwm1_enable'], **telemetry}
         except Exception as e:
             return {'ok': False, 'revision': self.revision, 'error': str(e),
@@ -188,6 +217,8 @@ class FanEngine:
             self.change()
 
     def apply(self, slot, draft):
+        if type(slot) is not int or slot not in (1, 2):
+            raise ValueError('Invalid preset')
         self.validate(draft)
         if not self.gaming() or time.monotonic() - self.heartbeat() > 60:
             raise ValueError('Apply requires game mode and a live plugin heartbeat')
@@ -205,13 +236,18 @@ class FanEngine:
                     decode(raw)
             self.tx = {'boot': self.boot, 'baseline': snap, 'last': snap}
             self.save(self.journal, self.tx)
+        # Legacy drafts may contain edited temperatures. The EC owns each fan's
+        # temperature axis; normalize metadata without writing temperature nodes.
+        draft = copy.deepcopy(draft)
         self.resume_at = None
         self.state = 'applying'
         try:
             self.write('pwm1_enable', 2)
+            axis = self.hw.snapshot()
+            for i, point in enumerate(draft['points'], 1):
+                point['temp'] = axis[f'pwm1_auto_point{i}_temp']
             for f in (1, 2):
                 for i, point in enumerate(draft['points'], 1):
-                    self.write(f'pwm{f}_auto_point{i}_temp', point['temp'])
                     self.write(f'pwm{f}_auto_point{i}_pwm', encode(outputs[i-1]))
             self.write('pwm1_enable', 1)
             self.tx['applied'] = {'slot': slot, 'draft': copy.deepcopy(draft)}
@@ -292,7 +328,7 @@ class FanEngine:
         self.resume_at = None
         try:
             # Reprogram even if readback survived: the EC may have lost activation.
-            self.apply(plan['slot'], plan['draft'])
+            self.apply(plan['slot'] if plan['slot'] in (1, 2) else 1, plan['draft'])
             LOG.info('Fan resume applied: slot=%s', plan['slot'])
             self.error = 'Restored the fan preset used before suspend'
         except Exception as e:
@@ -314,17 +350,21 @@ class FanEngine:
                     plan = self.settings.get('boot_plan')
                     if not isinstance(plan, dict) or type(plan.get('slot')) is not int or plan['slot'] not in (1,2,3,4):
                         raise ValueError('Invalid startup preset; apply a preset and set the toggle again')
-                    self.apply(plan['slot'], plan['draft'])
+                    self.apply(plan['slot'] if plan['slot'] in (1, 2) else 1, plan['draft'])
                 except Exception as e:
                     self.error = 'Startup application failed; no retry this boot: ' + str(e)
                     self.change()
             return
         try:
-            if self.hw.snapshot() != self.tx['last']:
+            snapshot = self.hw.snapshot()
+            if self.release_automatic(snapshot):
+                return
+            if snapshot != self.tx['last']:
                 self.state = 'conflict'
                 self.error = 'External fan changes detected; control stopped'
                 return
-            if not self.gaming() or time.monotonic() - self.heartbeat() > 60:
+            # The backend monitors telemetry even when the panel is closed.
+            if not self.gaming():
                 self.restore()
                 return
             try:
@@ -364,7 +404,7 @@ class FanEngine:
                 self.restore()
             else:
                 slot, draft = req['slot'], req['draft']
-                if type(slot) is not int or not 1 <= slot <= 4:
+                if type(slot) is not int or slot not in (1, 2):
                     raise ValueError('Invalid preset')
                 self.validate(draft)
                 settings = copy.deepcopy(self.settings)

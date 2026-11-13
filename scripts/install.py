@@ -53,9 +53,10 @@ def main():
     unit_text = (ROOT/'systemd/claw-cpu-control.service').read_text()
     unit_text = unit_text.replace('[Install]', '[Service]\nReadWritePaths=' + str(fan_path.parent) + '\n\n[Install]')
     from power import PowerHardware
-    PowerHardware().snapshot()
-    for name in PowerHardware.names.values():
-        power_path = (PowerHardware.root/name/'current_value').resolve()
+    power = PowerHardware()
+    power_status = power.snapshot()
+    for path in power.domains()[power_status['backend']].values():
+        power_path = path.resolve()
         unit_text = unit_text.replace('[Install]', '[Service]\nReadWritePaths='+str(power_path)+'\n\n[Install]')
     UNIT.write_text(unit_text); os.chmod(UNIT,0o644)
     shutil.copytree(ROOT/'decky-plugin',PLUGIN)

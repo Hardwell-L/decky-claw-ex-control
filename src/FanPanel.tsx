@@ -1,10 +1,11 @@
+import {localize,useLanguage} from './i18n';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { callable } from '@decky/api';
 import { PanelSection, PanelSectionRow, ButtonItem, SliderField, ToggleField, DialogButton, Focusable } from '@decky/ui';
 type Draft = {mode:'fixed'|'curve';fixed:number;points:{temp:number;output:number}[]};
 type Status = {ok:boolean;error?:string;message?:string;revision?:string;state?:string;mode?:number;gaming?:boolean;
   autostart?:boolean;boot_plan?:{slot:number};has_transaction?:boolean;temperature?:number;rpm?:number[];initial?:Draft;
-  settings?:{selected:number;presets:Record<string,Draft|null>};applied?:{slot:number;draft:Draft}};
+  temperature_axes?:number[][];settings?:{selected:number;presets:Record<string,Draft|null>};applied?:{slot:number;draft:Draft}};
 const read = callable<[],Status>('get_fan_status');
 const mutate = callable<[Record<string,unknown>],Status>('mutate');
 let cachedStatus:Status|null=null;
@@ -19,7 +20,11 @@ function send(action:Record<string,unknown>) {
   });
   queue=task.catch(()=>undefined);return task;
 }
+function onHardwareAxis(draft:Draft,initial?:Draft):Draft {
+  return initial?{...draft,points:draft.points.map((p,i)=>({...p,temp:initial.points[i].temp}))}:draft;
+}
 export function FanPanel() {
+ useLanguage();
   const cachedSlot=cachedStatus?.settings?.selected===2?2:1;
   const [s,setS]=useState<Status>(cachedStatus || {ok:false}),[slot,setSlot]=useState(cachedSlot),[draft,setDraft]=useState<Draft|null>(cachedStatus?.settings?.presets[String(cachedSlot)] || cachedStatus?.initial || null);
   const [enabled,setEnabled]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[edit,setEdit]=useState<number|null>(null);
@@ -45,9 +50,9 @@ export function FanPanel() {
       try {
         await queue;const result=await read();if(!alive.current)return;cachedStatus=result;setS(result);
         if(result.ok && result.settings && result.initial && !initialized.current){
-          for(const [key,value] of Object.entries(result.settings.presets)){if(value)drafts.current[key]=value;}
+          for(const [key,value] of Object.entries(result.settings.presets)){if(value)drafts.current[key]=onHardwareAxis(value,result.initial);}
           const selected=[1,2].includes(result.settings.selected)?result.settings.selected:1;
-          setSlot(selected);setDraft(result.settings.presets[String(selected)] || result.initial);
+          setSlot(selected);setDraft(onHardwareAxis(result.settings.presets[String(selected)] || result.initial,result.initial));
           setEnabled(result.state==='active');initialized.current=true;
         }
       }catch(e){if(alive.current)setError(String(e));}finally{fetching=false;}
@@ -73,7 +78,7 @@ export function FanPanel() {
   const dirty=!s.applied || s.applied.slot!==slot || JSON.stringify(s.applied.draft)!==JSON.stringify(draft);
   const disabled=busy || !draft;
   const states:Record<string,string>={idle:s.mode===1?'External custom control':'System automatic',active:'Custom settings active',conflict:'External settings changed',restoring:'Restoring',recovery_required:'Recovery required'};
-  return <PanelSection title="Dual-fan control">
+  return localize(<PanelSection title="Dual-fan control">
     <PanelSectionRow><ToggleField label="Enable fan control" checked={enabled || !!s.has_transaction} disabled={busy || !s.revision} onChange={toggle}/></PanelSectionRow>
     <PanelSectionRow><ToggleField label="Restore fans at startup" checked={s.autostart===true}
       disabled={busy || !s.revision} onChange={value=>{flush();void run({method:'fan_autostart',enabled:value}).catch(()=>undefined);}}/></PanelSectionRow>
@@ -94,22 +99,22 @@ export function FanPanel() {
         {draft?.mode===mode?'● ':'○ '}{mode==='fixed'?'Fixed output':'Fan curve'}
       </DialogButton>)}
     </Focusable></PanelSectionRow>
+    <PanelSectionRow><div style={{fontSize:12,lineHeight:1.5,opacity:.8}}>Temperature nodes are set by the firmware. Edit output only; percentage is not RPM.</div></PanelSectionRow>
     {draft?.mode==='fixed' ? <>
       <PanelSectionRow><SliderField label="Fan output" min={0} max={100} step={1} value={draft.fixed} showValue valueSuffix="%" disabled={busy} onChange={v=>change({...draft,fixed:v})}/></PanelSectionRow>
       <PanelSectionRow><Focusable noFocusRing flow-children="horizontal" style={{display:'grid',gridTemplateColumns:'repeat(2, minmax(0, 1fr))',gap:8,width:'100%',minWidth:0}}>{[-5,5].map(v=><DialogButton style={{minWidth:0,width:'100%',margin:0,padding:'10px 4px',boxSizing:'border-box'}} key={v} disabled={busy} onClick={()=>change({...draft,fixed:Math.max(0,Math.min(100,draft.fixed+v))})}>{v>0?'+5%':'−5%'}</DialogButton>)}</Focusable></PanelSectionRow>
     </> : draft?.points.map((point,i)=><Fragment key={i}><PanelSectionRow>
-      <ButtonItem layout="below" disabled={busy} onClick={()=>setEdit(edit===i?null:i)}><span style={{display:'flex',justifyContent:'space-between',gap:8,width:'100%'}}><span>{point.temp}°C</span><span>{point.output}%</span><span>{edit===i?'Done':'Edit'}</span></span></ButtonItem></PanelSectionRow>
+      <ButtonItem layout="below" disabled={busy} onClick={()=>setEdit(edit===i?null:i)}><span style={{display:'flex',justifyContent:'space-between',gap:8,width:'100%'}}><span>{point.temp}°C{s.temperature_axes?.[1]?.[i]!==undefined && s.temperature_axes[1][i]!==point.temp?` / ${s.temperature_axes[1][i]}°C`:''}</span><span>{point.output}%</span><span>{edit===i?'Done':'Edit'}</span></span></ButtonItem></PanelSectionRow>
       {edit===i && <>
-        <PanelSectionRow><SliderField label="Temperature" min={i===0?0:draft.points[i-1].temp+1} max={i===5?100:draft.points[i+1].temp-1} step={1} value={point.temp} showValue valueSuffix="°C" disabled={busy} onChange={v=>change({...draft,points:draft.points.map((p,j)=>j===i?{...p,temp:v}:p)})}/></PanelSectionRow>
         <PanelSectionRow><SliderField label="Output" min={i===0?0:draft.points[i-1].output} max={i===5?100:draft.points[i+1].output} step={1} value={point.output} showValue valueSuffix="%" disabled={busy} onChange={v=>change({...draft,points:draft.points.map((p,j)=>j===i?{...p,output:v}:p)})}/></PanelSectionRow>
       </>}
     </Fragment>)}
     <PanelSectionRow><div style={{fontSize:12,lineHeight:1.6}}>
       Editing preset {slot}; active: {s.applied && s.state==='active'?`Preset ${s.applied.slot}`:'None'}<br/>
       {busy?'Saving / updating…':dirty?'Unapplied changes':'Settings applied'}<br/>
-      Select Apply to use custom output. Missing RPM feedback restores automatic control. The toggle above controls startup behavior.
+      Closing this panel keeps the applied curve. Disable control to return both fans to system automatic mode. Missing RPM feedback restores automatic control.
       {(error || s.error || s.message) && <div style={{color:'#ffbf80'}}>{error || s.error || s.message}</div>}
     </div></PanelSectionRow>
     <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !enabled || !s.gaming || !s.ok} onClick={()=>{flush();void run({method:'fan_apply',slot,draft}).catch(()=>undefined);}}>Apply settings</ButtonItem></PanelSectionRow>
-  </PanelSection>;
+  </PanelSection>);
 }

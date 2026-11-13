@@ -2,6 +2,9 @@
 import asyncio
 import json
 import uuid
+import os
+import re
+from pathlib import Path
 
 SOCKET = '/run/claw-cpu-control/control.sock'
 
@@ -20,6 +23,25 @@ class Plugin:
             if writer:
                 writer.close()
                 await writer.wait_closed()
+
+    async def get_ui_language(self):
+        # Read only fixed user configuration paths; no shell or hardware access.
+        for path in [Path.home()/'.steam/registry.vdf', Path.home()/'.local/share/Steam/config/config.vdf']:
+            try:
+                match = re.search(r'"language"\s*"([^"\r\n]+)"', path.read_text()[:2000000], re.I)
+                if match:
+                    value = match.group(1).lower()
+                    return {'language': 'zh' if value in ('schinese','tchinese','chinese') or value.startswith('zh') else 'en'}
+            except (OSError, UnicodeError):
+                pass
+        value = os.environ.get('LC_ALL') or os.environ.get('LC_MESSAGES') or os.environ.get('LANG', '')
+        if not value or value in ('C','C.UTF-8','POSIX'):
+            try:
+                match = re.search(r'^LANG=["\']?([^"\'\n]+)', Path('/etc/locale.conf').read_text(), re.M)
+                if match: value = match.group(1)
+            except OSError:
+                pass
+        return {'language': 'zh' if value.lower().startswith('zh') else 'en'}
 
     async def get_status(self):
         return await self._rpc({'method': 'get_status'})

@@ -1,3 +1,4 @@
+import {localize,useLanguage} from './i18n';
 import {useEffect,useRef,useState} from 'react';
 import {callable} from '@decky/api';
 import {PanelSectionRow,ToggleField} from '@decky/ui';
@@ -30,6 +31,7 @@ function changeBoot(feature:string,enabled:boolean){
  });
 }
 export function BootToggle({feature,label}:{feature:string;label:string}){
+ useLanguage();
  const [s,setS]=useState<Status>({ok:false}),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const alive=useRef(false),working=useRef(false);
  useEffect(()=>{alive.current=true;const unsubscribe=subscribe(result=>{if(alive.current)setS(result);});return()=>{alive.current=false;unsubscribe();};},[]);
@@ -37,6 +39,6 @@ export function BootToggle({feature,label}:{feature:string;label:string}){
   await changeBoot(feature,enabled);
  }catch(e){if(alive.current)setError(String(e));}finally{working.current=false;if(alive.current)setBusy(false);}}
  const entry=s.features?.[feature];
- return <><PanelSectionRow><ToggleField label={label} checked={entry?.enabled||false} disabled={busy||!s.ok||(!entry?.enabled&&entry?.last==null)} onChange={v=>void toggle(v)}/></PanelSectionRow>
- <PanelSectionRow><div style={{fontSize:12,opacity:.75,lineHeight:1.5}}>{entry?.last==null?'Apply settings successfully before enabling startup restore.':'Restore the last successfully applied settings when game mode starts.'}{(error||entry?.error||s.error)&&<div>{error||entry?.error||s.error}</div>}</div></PanelSectionRow></>;
+ return localize(<><PanelSectionRow><ToggleField label={label} checked={entry?.enabled||false} disabled={busy||!s.ok||(!entry?.enabled&&entry?.last==null)} onChange={v=>void toggle(v)}/></PanelSectionRow>
+ <PanelSectionRow><div style={{fontSize:12,opacity:.75,lineHeight:1.5}}>{entry?.last==null?'Apply settings successfully before enabling startup restore.':'Restore the last successfully applied settings when game mode starts.'}{(error||entry?.error||s.error)&&<div>{error||entry?.error||s.error}</div>}</div></PanelSectionRow></>);
 }

@@ -26,7 +26,7 @@ const api={definePlugin:f=>f,callable:route=>async(req)=>{
  return clone();
 }};
 const jsx=(type,props)=>({type,props});
-const context={exports:{},require:name=>name==='react'?react:name==='react/jsx-runtime'?{jsx,jsxs:jsx,Fragment:'fragment'}:name==='@decky/api'?api:{PanelSection:'section',PanelSectionRow:'row',DialogButton:'button',Focusable:'focusable',ButtonItem:'button',SliderField:'slider',ToggleField:'toggle'},
+const context={exports:{},require:name=>name==='./i18n'?{localize:x=>x,useLanguage:()=>{}}:name==='react'?react:name==='react/jsx-runtime'?{jsx,jsxs:jsx,Fragment:'fragment'}:name==='@decky/api'?api:{PanelSection:'section',PanelSectionRow:'row',DialogButton:'button',Focusable:'focusable',ButtonItem:'button',SliderField:'slider',ToggleField:'toggle'},
  setTimeout:(fn,ms)=>{const id=++nextTimer;timers.set(id,{fn,ms});return id;},clearTimeout:id=>timers.delete(id),
  setInterval:()=>0,clearInterval:()=>{},crypto:require('node:crypto')};
 const code=ts.transpileModule(fs.readFileSync('src/index.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2020}}).outputText;

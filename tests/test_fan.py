@@ -63,7 +63,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.hw.data,self.hw.original)
     def test_lower_output_applies_both_and_restores(self):
         self.draft['mode']='fixed';self.draft['fixed']=20
-        result=self.request('fan_apply',slot=3,draft=self.draft)
+        result=self.request('fan_apply',slot=2,draft=self.draft)
         self.assertTrue(result['ok'])
         for fan in (1,2):
             for i in range(1,7):self.assertEqual(self.hw.data[f'pwm{fan}_auto_point{i}_pwm'],51)
@@ -85,9 +85,43 @@ class Tests(unittest.TestCase):
             self.e.apply(1,self.draft)
             self.e=self.engine(boot)
             self.assertEqual(self.hw.data,self.hw.original);self.assertIsNone(self.e.tx)
-    def test_heartbeat_loss_restores(self):
-        self.e.apply(1,self.draft);self.beat-=61;self.e.watchdog()
+    def test_closed_panel_keeps_curve_with_backend_monitoring(self):
+        self.e.apply(1,self.draft);before=self.hw.snapshot();count=len(self.hw.writes)
+        self.beat-=61;self.e.watchdog()
+        self.assertEqual(self.hw.data,before)
+        self.assertEqual(len(self.hw.writes),count)
+        self.assertEqual(self.e.state,'active')
+        self.e.started-=11
+        self.hw.telemetry=lambda:{'rpm':[0,4100],'temperature':57}
+        self.e.watchdog()
         self.assertEqual(self.hw.data,self.hw.original)
+
+    def test_exit_game_restores(self):
+        self.e.apply(1,self.draft);self.game=False;self.e.watchdog()
+        self.assertEqual(self.hw.data,self.hw.original)
+
+    def test_legacy_temperature_edits_never_write_temperature_nodes(self):
+        for point in self.draft['points']:point['temp']+=1
+        self.hw.data['pwm2_auto_point2_temp']=51
+        self.hw.original=copy.deepcopy(self.hw.data)
+        self.e.apply(1,self.draft)
+        self.assertFalse(any(k.endswith('_temp') for k,v in self.hw.writes))
+        self.assertEqual(self.hw.data['pwm2_auto_point2_temp'],51)
+        self.assertEqual(self.e.tx['applied']['draft']['points'][0]['temp'],47)
+        self.assertEqual(self.e.status()['temperature_axes'][1][1],51)
+
+    def test_only_two_slots_accept_new_requests(self):
+        for slot in (0,3,4,True):
+            self.assertFalse(self.request('fan_apply',slot=slot,draft=self.draft)['ok'])
+        self.assertFalse(self.hw.writes)
+
+    def test_legacy_selected_slot_is_preserved_in_first_slot(self):
+        d.atomic_json(self.e.file,{'selected':3,'presets':{'3':self.draft}})
+        self.e=self.engine()
+        self.assertEqual(self.e.settings['selected'],1)
+        self.assertEqual(self.e.settings['presets']['1'],self.draft)
+        self.assertEqual(self.e.settings['presets']['3'],self.draft)
+        self.assertFalse(self.hw.writes)
     def test_desktop_rejects_application(self):
         self.game=False
         with self.assertRaises(ValueError):self.e.apply(1,self.draft)
@@ -244,3 +278,20 @@ class Tests(unittest.TestCase):
         self.assertFalse(any(key.endswith('_temp') for key,value in self.hw.writes))
         self.assertIn(('pwm1_enable',1),self.hw.writes)
         self.e.restore();self.assertEqual(self.hw.data,self.hw.original)
+
+    def test_automatic_reset_releases_stale_transaction_without_writes(self):
+        self.e.apply(1,self.draft)
+        self.hw.data=copy.deepcopy(self.hw.original)
+        count=len(self.hw.writes);self.e.watchdog()
+        self.assertIsNone(self.e.tx);self.assertEqual(self.e.state,'idle')
+        self.assertEqual(len(self.hw.writes),count)
+        self.assertTrue(list(Path(self.tmp.name).glob('fan-released-*.json')))
+        self.e.apply(1,self.draft);self.assertEqual(self.e.state,'active')
+    def test_startup_releases_automatic_reset_without_writes(self):
+        self.e.apply(1,self.draft);self.hw.data=copy.deepcopy(self.hw.original)
+        count=len(self.hw.writes);self.e=self.engine()
+        self.assertIsNone(self.e.tx);self.assertEqual(len(self.hw.writes),count)
+    def test_pending_transaction_not_discarded_for_automatic_mode(self):
+        self.e.apply(1,self.draft);self.e.tx['pending']={'before':self.hw.snapshot()}
+        self.hw.data=copy.deepcopy(self.hw.original)
+        self.e.watchdog();self.assertIsNotNone(self.e.tx)

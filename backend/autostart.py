@@ -16,6 +16,9 @@ class Autostart:
         self.data=json.loads(self.file.read_text()) if self.file.exists() else {}
         self.revision=uuid.uuid4().hex
         self.cache={}
+        self.last_game = None
+        self.power_stable = None
+        self.power_since = 0.0
     def persist(self):
         self.save(self.file,self.data);self.revision=uuid.uuid4().hex
     def entry(self,key):
@@ -60,16 +63,41 @@ class Autostart:
         elif method=='set_turbo':self.record('turbo',req['enabled'])
         elif method=='power_apply' and self.power.state=='active':
             self.record('power',{k:req[k] for k in ('pl1','pl2')})
+    def rearm_power(self):
+        # A lifecycle event permits one new attempt, not continuous enforcement.
+        self.power_stable = None
+        if self.entry('power')['enabled']:
+            self.entry('power')['attempted'] = None
+            self.entry('power')['error'] = ''
+            self.persist()
+
+    def on_resume(self):
+        self.rearm_power()
+
     def watchdog(self):
-        if not self.cpu.gaming() or self.cpu.last_heartbeat<=0 or time.monotonic()-self.cpu.last_heartbeat>60:return
+        gaming = bool(self.cpu.gaming())
+        if self.last_game is False and gaming:
+            self.rearm_power()
+        self.last_game = gaming
+        if not gaming or self.cpu.last_heartbeat<=0 or time.monotonic()-self.cpu.last_heartbeat>60:
+            self.power_stable = None
+            return
         for key in self.features:
             e=self.entry(key)
             if not e['enabled'] or e['attempted']==self.boot:continue
-            # Wait for Steam to select custom mode; never change platform profile.
+            # Wait for a stable RAPL interface and limits; do not change platform profile.
             if key=='power':
                 try:
-                    if self.power.hw.snapshot()['profile']!='custom':continue
-                except Exception:continue
+                    current = self.power.hw.snapshot()
+                    observed = {k: current.get(k) for k in ('identity', 'pl1', 'pl2', 'msr')}
+                    if observed != self.power_stable:
+                        self.power_stable, self.power_since = observed, time.monotonic()
+                        continue
+                    if time.monotonic() - self.power_since < 10:
+                        continue
+                except Exception:
+                    self.power_stable = None
+                    continue
             self.consume(key)  # Durable, before any writes: no repeated attempts on restart.
             try:
                 value=e['last']
